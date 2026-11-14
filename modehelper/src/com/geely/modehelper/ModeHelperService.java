@@ -168,14 +168,27 @@ public class ModeHelperService extends Service {
         }, "dexopt").start();
     }
 
-    // PARKED: read the mode and, if it differs from the saved default, correct it.
+    // PARKED: read each mode and, if a choice was saved and the car differs,
+    // correct it. No saved choice means "don't touch it": defaults the owner
+    // never picked are never forced onto the car.
     private void enforceModeParked() {
         SharedPreferences p = getSharedPreferences("modehelper", MODE_PRIVATE);
-        int drive = p.getInt("drive", CarMode.DRIVE_ECO);
-        int regen = p.getInt("regen", CarMode.REGEN_MID);
-        Integer cd = car.readDrive(), cr = car.readRegen();
-        if (cd != null && cd != drive) { car.writeDrive(drive); Log.i(TAG, "mode: drive " + cd + " -> " + drive); }
-        if (cr != null && cr != regen) { car.writeRegen(regen); Log.i(TAG, "mode: regen " + cr + " -> " + regen); }
+        if (p.contains("drive")) {
+            int want = p.getInt("drive", CarMode.DRIVE_ECO);
+            Integer have = car.readDrive();
+            if (have != null && have != want) {
+                car.writeDrive(want);
+                Log.i(TAG, "mode: drive " + have + " -> " + want);
+            }
+        }
+        if (p.contains("regen")) {
+            int want = p.getInt("regen", CarMode.REGEN_MID);
+            Integer have = car.readRegen();
+            if (have != null && have != want) {
+                car.writeRegen(want);
+                Log.i(TAG, "mode: regen " + have + " -> " + want);
+            }
+        }
     }
 
     // Command-line pairing, driven by adb:
