@@ -31,12 +31,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- AdbControl writes Settings.Global.ADB_ENABLED. -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
-    <!-- Command-line Bluetooth pairing (BtPairReceiver). -->
+    <!-- Bluetooth: command-line pairing (BtPairReceiver) and BluetoothKeeper. -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.BLUETOOTH_PRIVILEGED" />
 
-    <application android:label="ModeHelper" android:allowBackup="false">
+    <application android:name=".HelperApp" android:label="ModeHelper" android:allowBackup="false">
         <service android:name=".ModeHelperService" android:exported="false" />
 
         <!-- System broadcasts and own alarms only; no permission possible here. -->
@@ -63,6 +63,22 @@
             android:permission="com.geely.modehelper.permission.CONTROL">
             <intent-filter>
                 <action android:name="com.geely.modehelper.READPROP" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Range estimate: print it, or change window / capacity. -->
+        <receiver android:name=".RangeReceiver" android:exported="true"
+            android:permission="com.geely.modehelper.permission.CONTROL">
+            <intent-filter>
+                <action android:name="com.geely.modehelper.RANGE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Keep Bluetooth on after the car starts: status and switches. -->
+        <receiver android:name=".BtKeepReceiver" android:exported="true"
+            android:permission="com.geely.modehelper.permission.CONTROL">
+            <intent-filter>
+                <action android:name="com.geely.modehelper.BT_KEEP" />
             </intent-filter>
         </receiver>
 

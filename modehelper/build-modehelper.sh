@@ -71,7 +71,7 @@ echo "version: versionCode=$VC versionName=$VN"
 rm -rf obj *.apk classes.dex; mkdir -p obj
 "$BT/aapt2" link -o base.apk -I "$AJ" --manifest "$MANIFEST_BUILD" \
   --min-sdk-version 28 --target-sdk-version 28
-"$JAVA_HOME/bin/javac" -classpath "$AJ:$CARJAR" -d obj $(find src -name '*.java')
+"$JAVA_HOME/bin/javac" -classpath "$AJ:$CARJAR" -d obj $(find src ../assistcore/src/main/java -name '*.java')
 "$BT/d8" --min-api 28 --lib "$AJ" --output . $(find obj -name '*.class')
 cp base.apk unsigned.apk && zip -qj unsigned.apk classes.dex
 "$BT/zipalign" -f 4 unsigned.apk aligned.apk
