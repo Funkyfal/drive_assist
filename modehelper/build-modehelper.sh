@@ -47,7 +47,7 @@ LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUVxRENDQTVDZ0F3SUJBZ0lKQUxPWmdJYlFWcy82
 EOF
   fi
 fi
-_fp=$(openssl x509 -in "$KEY/platform.x509.pem" -outform DER | sha256sum | cut -d' ' -f1)
+_fp=$(openssl x509 -in "$KEY/platform.x509.pem" -outform DER | shasum -a 256 | cut -d' ' -f1)
 [ "$_fp" = "c8a2e9bccf597c2fb6dc66bee293fc13f2fc47ec77bc6b2b0d52c11f51192ab8" ] \
   || { echo "ABORT: platform key != the car's ($_fp)"; exit 2; }
 echo "signing with the platform key ($_fp)"
