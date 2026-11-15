@@ -65,6 +65,14 @@
             </intent-filter>
         </receiver>
 
+        <!-- Read-only timeline of all car properties (PropWatch). -->
+        <receiver android:name=".PropsReceiver" android:exported="true"
+            android:permission="com.geely.modehelper.permission.CONTROL">
+            <intent-filter>
+                <action android:name="com.geely.modehelper.PROPS" />
+            </intent-filter>
+        </receiver>
+
         <!-- Range estimate: print it, or change window / capacity. -->
         <receiver android:name=".RangeReceiver" android:exported="true"
             android:permission="com.geely.modehelper.permission.CONTROL">
