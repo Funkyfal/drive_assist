@@ -6,15 +6,25 @@ import android.os.SystemClock;
 import android.util.Log;
 
 import com.geely.assist.core.ModePolicy;
+import com.geely.assist.core.OnOffTracker;
 
 /**
  * Keeps the drive and regeneration modes the driver wants and puts them back
- * after the car wakes up or starts. The decisions are ModePolicy's; this class
+ * after the car is switched on. The decisions are ModePolicy's; this class
  * reads the car, writes it, stores the saved values and logs everything to
  * EventLog. Learning from what the driver picks is OFF until switched on.
+ *
+ * "Car switched on/off" comes from a vendor property that mirrors the ignition.
+ * Observed 2026-11-15: the car resets the drive mode to Comfort the moment it
+ * is switched off, and this property then reads 2 until it is switched on
+ * again (4). Suspend and shutdown signals are used too when they arrive.
  */
 final class ModeMemory {
     static final String TAG = CarMode.TAG;
+
+    /** 4 while the car is on, 2 while it is switched off (same coding as IGNITION_STATE). */
+    static final int PROP_VEHICLE_STATE = 557875211;
+    static final int VEHICLE_ON = 4;
 
     private static final String PREFS = "modes";
     private static final long TICK_MS = 2_000L;
@@ -72,8 +82,10 @@ final class ModeMemory {
     private final Thread thread;
     private volatile boolean running = true;
     private final Mode drive, regen;
+    private final OnOffTracker vehicle = new OnOffTracker(VEHICLE_ON);
     private int nullStreak;
     private boolean lastParked;
+    private Integer lastGear;
     private boolean powerWatchTried;
 
     private ModeMemory(Context app) {
@@ -136,6 +148,7 @@ final class ModeMemory {
 
     synchronized String describe() {
         return "modes: learn=" + drive.policy.isLearning()
+                + " vehicle=" + vehicle.last()
                 + " drive=" + driveName(drive.lastSeen) + " saved=" + driveName(drive.policy.saved())
                 + " pending=" + drive.policy.isPending()
                 + " | regen=" + regenName(regen.lastSeen) + " saved=" + regenName(regen.policy.saved())
@@ -184,6 +197,21 @@ final class ModeMemory {
     }
 
     private synchronized void tick(long now) {
+        // The ignition first: the car resets the drive mode in the very moment
+        // it is switched off, so the off edge must be known before the modes are judged.
+        Integer before = vehicle.last();
+        Integer vs = car.readIntProp(PROP_VEHICLE_STATE, 0);
+        OnOffTracker.Edge edge = vehicle.update(vs);
+        if (edge == OnOffTracker.Edge.TURNED_OFF) {
+            EventLog.i("modes: vehicle state " + before + " -> " + vs);
+            onGoingOff("vehicle off");
+        } else if (edge == OnOffTracker.Edge.TURNED_ON) {
+            EventLog.i("modes: vehicle state " + before + " -> " + vs);
+            onWake("vehicle on");
+        } else if (before == null && vs != null) {
+            EventLog.i("modes: vehicle state is " + vs);
+        }
+
         Integer d = car.readDrive(), r = car.readRegen();
         if (d == null && r == null) {
             // The binder may be dead after a suspend; reconnect after a few misses.
@@ -197,7 +225,7 @@ final class ModeMemory {
         nullStreak = 0;
         Integer g = car.readGear();
         boolean parked = g != null && g == CarMode.GEAR_PARK;
-        if (parked != lastParked || g != lastGear) {
+        if (parked != lastParked || (g != null && !g.equals(lastGear))) {
             EventLog.i("modes: gear " + g + " parked=" + parked);
             lastParked = parked;
             lastGear = g;
@@ -205,8 +233,6 @@ final class ModeMemory {
         drive.observe(d, parked, now);
         regen.observe(r, parked, now);
     }
-
-    private Integer lastGear;
 
     // ---------------------------------------------------------------- one mode
 
