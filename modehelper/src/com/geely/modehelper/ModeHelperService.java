@@ -7,24 +7,22 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.net.wifi.SupplicantState;
-import android.net.wifi.WifiInfo;
-import android.net.wifi.WifiManager;
 import android.os.IBinder;
 import android.os.SystemClock;
 import android.util.Log;
 
-// System helper (uid system), no UI. Polls every 4 s to:
-// 1) hold the saved drive/regen mode while parked (P), overriding car defaults;
-// 2) keep Wi-Fi on while parked and nudge scans when adrift.
-// The wanted modes arrive via the SET_MODE broadcast, guarded by PERMISSION.
+// System helper (uid system), no UI. Runs continuously to:
+// 1) keep the car connection and the power-state listener alive
+//    (a resume wakes ModeMemory so it can restore the saved modes);
+// 2) compile the helper after each install (Dexopt);
+// 3) answer command-line Bluetooth pairing (BT_PAIR).
+// The modes themselves live in ModeMemory, the range in RangeTracker,
+// Bluetooth in BluetoothKeeper. Wi-Fi is no longer forced on.
 public class ModeHelperService extends Service {
     static final String TAG = "ModeHelper";
     /** Signature permission guarding every entry point reachable from outside. */
     static final String PERMISSION = "com.geely.modehelper.permission.CONTROL";
-    static final String SET_MODE = "com.geely.modehelper.SET_MODE";
     public static final String ACTION_BT_PAIR = "com.geely.modehelper.svc.BT_PAIR";
     /** A pairing request is only answered for this long after BT_PAIR. */
     static final long BT_PAIR_WINDOW_MS = 60_000L;
@@ -32,8 +30,6 @@ public class ModeHelperService extends Service {
     private final CarMode car = new CarMode();
     private volatile boolean running = false;
     private Thread poll;
-    private BroadcastReceiver rx;
-    private int lastGear = -999;
 
     private boolean btRxRegistered = false;
     private volatile byte[] pendingPin = null;
@@ -45,39 +41,6 @@ public class ModeHelperService extends Service {
         if (i != null && ACTION_BT_PAIR.equals(i.getAction())) {
             ensureBtListener();
             pairByAddress(i.getStringExtra("addr"), i.getStringExtra("pin"));
-        }
-        if (rx == null) {
-            rx = new BroadcastReceiver() {
-                @Override public void onReceive(Context c, Intent it) {
-                    if (!SET_MODE.equals(it.getAction())) return;
-                    SharedPreferences.Editor e =
-                            getSharedPreferences("modehelper", MODE_PRIVATE).edit();
-                    StringBuilder log = new StringBuilder("default from sender:");
-                    if (it.hasExtra("drive")) {
-                        int d = it.getIntExtra("drive", CarMode.DRIVE_ECO);
-                        if (d == CarMode.DRIVE_ECO || d == CarMode.DRIVE_COMFORT
-                                || d == CarMode.DRIVE_SPORT) {
-                            e.putInt("drive", d);
-                            log.append(" drive=").append(d);
-                        } else {
-                            log.append(" drive=REJECTED(").append(d).append(")");
-                        }
-                    }
-                    if (it.hasExtra("regen")) {
-                        int r = it.getIntExtra("regen", CarMode.REGEN_MID);
-                        if (r == CarMode.REGEN_LOW || r == CarMode.REGEN_MID
-                                || r == CarMode.REGEN_HIGH) {
-                            e.putInt("regen", r);
-                            log.append(" regen=").append(r);
-                        } else {
-                            log.append(" regen=REJECTED(").append(r).append(")");
-                        }
-                    }
-                    e.apply();
-                    Log.i(TAG, log.toString());
-                }
-            };
-            registerReceiver(rx, new IntentFilter(SET_MODE), PERMISSION, null);
         }
         cleanupInstaller();
         if (!running) {
@@ -118,17 +81,7 @@ public class ModeHelperService extends Service {
         while (running) {
             try {
                 if (!car.isReady()) car.connect(getApplicationContext());
-                Integer g = car.readGear();
-                boolean parked = (g != null && g == CarMode.GEAR_PARK);
                 maybeWatchPower();
-                if (g != null) {
-                    if (g != lastGear) Log.i(TAG, "gear " + lastGear + " -> " + g);
-                    lastGear = g;
-                    if (parked) enforceModeParked();
-                }
-                // Wi-Fi is forced only while parked; driving lets it drop naturally.
-                if (parked) ensureWifiOn();
-                nudgeWifiScan();
                 maybeDexopt();
             } catch (Throwable t) { Log.w(TAG, "poll: " + t); }
             // Liveness heartbeat for BootReceiver's watchdog (survives process death).
@@ -146,8 +99,9 @@ public class ModeHelperService extends Service {
         if (powerWatchTried || !car.isReady()) return;
         powerWatchTried = true;
         try {
-            boolean ok = PowerWatch.register(car.powerManager(),
-                    state -> Log.i(TAG, "power state " + state));
+            boolean ok = PowerWatch.register(car.powerManager(), state -> {
+                Log.i(TAG, "power state " + state);
+            });
             Log.i(TAG, "power watch: " + (ok ? "registered" : "no power manager"));
         } catch (Throwable t) { Log.w(TAG, "power watch: " + t); }
     }
@@ -166,29 +120,6 @@ public class ModeHelperService extends Service {
             try { Dexopt.ensure(getApplicationContext()); }
             finally { dexoptRunning = false; }
         }, "dexopt").start();
-    }
-
-    // PARKED: read each mode and, if a choice was saved and the car differs,
-    // correct it. No saved choice means "don't touch it": defaults the owner
-    // never picked are never forced onto the car.
-    private void enforceModeParked() {
-        SharedPreferences p = getSharedPreferences("modehelper", MODE_PRIVATE);
-        if (p.contains("drive")) {
-            int want = p.getInt("drive", CarMode.DRIVE_ECO);
-            Integer have = car.readDrive();
-            if (have != null && have != want) {
-                car.writeDrive(want);
-                Log.i(TAG, "mode: drive " + have + " -> " + want);
-            }
-        }
-        if (p.contains("regen")) {
-            int want = p.getInt("regen", CarMode.REGEN_MID);
-            Integer have = car.readRegen();
-            if (have != null && have != want) {
-                car.writeRegen(want);
-                Log.i(TAG, "mode: regen " + have + " -> " + want);
-            }
-        }
     }
 
     // Command-line pairing, driven by adb:
@@ -262,38 +193,6 @@ public class ModeHelperService extends Service {
         }
     }
 
-    // Aggressive Wi-Fi while parked: switches it back on if it drops.
-    private void ensureWifiOn() {
-        try {
-            WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
-            if (wm != null && !wm.isWifiEnabled()) {
-                boolean ok = wm.setWifiEnabled(true);
-                Log.i(TAG, "parked -> turning Wi-Fi on = " + ok);
-            }
-        } catch (Throwable t) { Log.w(TAG, "wifi: " + t); }
-    }
-
-    // Android 9's disconnected-scan backoff can delay reconnecting to saved
-    // networks for minutes; a scan every 30 s avoids that. System-uid apps are
-    // exempt from the background startScan() throttle.
-    static final long SCAN_EVERY_MS = 30_000;
-    private long lastScanMs = 0;
-
-    private void nudgeWifiScan() {
-        try {
-            WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
-            if (wm == null || !wm.isWifiEnabled()) return;
-            WifiInfo info = wm.getConnectionInfo();
-            boolean associated = info != null && info.getNetworkId() != -1
-                    && info.getSupplicantState() == SupplicantState.COMPLETED;
-            if (associated) { lastScanMs = 0; return; }
-            long now = SystemClock.elapsedRealtime();
-            if (lastScanMs != 0 && now - lastScanMs < SCAN_EVERY_MS) return;
-            lastScanMs = now;
-            Log.i(TAG, "wifi adrift -> startScan = " + wm.startScan());
-        } catch (Throwable t) { Log.w(TAG, "wifi scan: " + t); }
-    }
-
     private void startAsForeground() {
         try {
             String chn = "modehelper";
@@ -301,11 +200,11 @@ public class ModeHelperService extends Service {
                     (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
             if (android.os.Build.VERSION.SDK_INT >= 26) {
                 nm.createNotificationChannel(new android.app.NotificationChannel(
-                        chn, "Режим вождения", android.app.NotificationManager.IMPORTANCE_MIN));
+                        chn, "Помощник", android.app.NotificationManager.IMPORTANCE_MIN));
             }
             android.app.Notification n = new android.app.Notification.Builder(this, chn)
-                    .setContentTitle("Режим вождения")
-                    .setContentText("Сохраняет режим и держит Wi-Fi")
+                    .setContentTitle("Помощник")
+                    .setContentText("Запоминает режимы, считает запас хода")
                     .setSmallIcon(android.R.drawable.ic_menu_preferences)
                     .build();
             startForeground(51, n);
@@ -316,7 +215,6 @@ public class ModeHelperService extends Service {
 
     @Override public void onDestroy() {
         running = false;
-        if (rx != null) { try { unregisterReceiver(rx); } catch (Throwable ignored) {} rx = null; }
         car.disconnect();
         super.onDestroy();
     }

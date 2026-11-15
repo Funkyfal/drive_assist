@@ -22,7 +22,6 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <!-- WifiGuardReceiver holds a partial wakelock while on the trusted network. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Silent install/uninstall (Installer). signature|privileged: granted by the platform key. -->
@@ -82,6 +81,14 @@
             </intent-filter>
         </receiver>
 
+        <!-- Remembered drive and regeneration modes: status and manual control. -->
+        <receiver android:name=".ModeReceiver" android:exported="true"
+            android:permission="com.geely.modehelper.permission.CONTROL">
+            <intent-filter>
+                <action android:name="com.geely.modehelper.SET_MODE" />
+            </intent-filter>
+        </receiver>
+
         <receiver android:name=".AdbReceiver" android:exported="true"
             android:permission="com.geely.modehelper.permission.CONTROL">
             <intent-filter>
@@ -94,13 +101,6 @@
             <intent-filter>
                 <action android:name="com.geely.modehelper.WIFI_GUARD_CHECK" />
                 <action android:name="com.geely.modehelper.SET_TRUSTED_WIFI" />
-            </intent-filter>
-        </receiver>
-
-        <!-- Own self-rescheduled alarm only. -->
-        <receiver android:name=".WifiKeepOnReceiver" android:exported="false">
-            <intent-filter>
-                <action android:name="com.geely.modehelper.WIFI_KEEPON_CHECK" />
             </intent-filter>
         </receiver>
 
