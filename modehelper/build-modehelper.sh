@@ -47,7 +47,7 @@ LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUVxRENDQTVDZ0F3SUJBZ0lKQUxPWmdJYlFWcy82
 EOF
   fi
 fi
-_fp=$(openssl x509 -in "$KEY/platform.x509.pem" -outform DER | sha256sum | cut -d' ' -f1)
+_fp=$(openssl x509 -in "$KEY/platform.x509.pem" -outform DER | shasum -a 256 | cut -d' ' -f1)
 [ "$_fp" = "c8a2e9bccf597c2fb6dc66bee293fc13f2fc47ec77bc6b2b0d52c11f51192ab8" ] \
   || { echo "ABORT: platform key != the car's ($_fp)"; exit 2; }
 echo "signing with the platform key ($_fp)"
@@ -71,7 +71,7 @@ echo "version: versionCode=$VC versionName=$VN"
 rm -rf obj *.apk classes.dex; mkdir -p obj
 "$BT/aapt2" link -o base.apk -I "$AJ" --manifest "$MANIFEST_BUILD" \
   --min-sdk-version 28 --target-sdk-version 28
-"$JAVA_HOME/bin/javac" -classpath "$AJ:$CARJAR" -d obj $(find src -name '*.java')
+"$JAVA_HOME/bin/javac" -classpath "$AJ:$CARJAR" -d obj $(find src ../assistcore/src/main/java -name '*.java')
 "$BT/d8" --min-api 28 --lib "$AJ" --output . $(find obj -name '*.class')
 cp base.apk unsigned.apk && zip -qj unsigned.apk classes.dex
 "$BT/zipalign" -f 4 unsigned.apk aligned.apk
